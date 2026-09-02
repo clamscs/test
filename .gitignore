@@ -1,0 +1,20 @@
+# Build output
+build/
+cmake-build-*/
+*.geode
+*.pdb
+*.dbg
+*.dSYM
+*.zip
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# others
+*.md
