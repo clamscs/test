@@ -97,7 +97,7 @@ public:
 
 class DecisionEngine;
 
-class BotController {
+class BotController : public cocos2d::CCObject {
 public:
     static BotController& get();
 
