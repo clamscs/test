@@ -129,7 +129,8 @@ private:
     void buildOverlay();
     void refreshOverlay();
     void destroyOverlay();
-    bool handleOverlayTouch(cocos2d::CCObject* sender);
+    void onToggleBot(CCObject*);
+    void onToggleSafe(CCObject*);
 
     BotController() = default;
 
