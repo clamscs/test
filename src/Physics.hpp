@@ -17,4 +17,8 @@ void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX);
 
 void pickMode(PlayerFrame& f, PlayerObject* player);
 
+// Advance a single physics step (integrate + portals + collide).
+void stepSim(PlayerFrame const& in, bool input, Calibration const& cal, gd::vector<Cell> const& cells,
+             PlayerFrame& out, bool& died);
+
 } // namespace bot

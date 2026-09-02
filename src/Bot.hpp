@@ -126,7 +126,8 @@ private:
     PlayerFrame snapshot(PlayerObject* player) const;
     void calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal);
     gd::vector<Cell> scan(PlayLayer* pl, float xMin, float xMax) const;
-    void applyInput(PlayerObject* player, bool hold, bool* wasHolding);
+    void applyInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock);
+    void tickInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock);
 
     BotController() = default;
 
@@ -142,6 +143,8 @@ private:
 
     bool m_hold1 = false;
     bool m_hold2 = false;
+    int m_clickLock1 = 0;
+    int m_clickLock2 = 0;
 
     DecisionEngine* m_engine = nullptr;
     gd::vector<Cell> m_cells1;

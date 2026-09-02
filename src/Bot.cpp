@@ -23,6 +23,7 @@ void BotController::setEnabled(bool v) {
         if (m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
         if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
         m_hold1 = m_hold2 = false;
+        m_clickLock1 = m_clickLock2 = 0;
     }
 }
 
@@ -72,6 +73,7 @@ void BotController::onUpdate(PlayLayer* playLayer, float dt) {
 
     if (m_layer != playLayer) {
         m_hold1 = m_hold2 = false;
+        m_clickLock1 = m_clickLock2 = 0;
         m_layer = playLayer;
         m_p1Prev = PlayerFrame{};
         m_p2Prev = PlayerFrame{};
@@ -97,6 +99,7 @@ void BotController::onUpdate(PlayLayer* playLayer, float dt) {
 
 void BotController::onResetLevel(PlayLayer*) {
     m_hold1 = m_hold2 = false;
+    m_clickLock1 = m_clickLock2 = 0;
     m_p1Prev = PlayerFrame{};
     m_p2Prev = PlayerFrame{};
 }
@@ -107,6 +110,7 @@ bool BotController::onCompleteLevel() {
         if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
     }
     m_hold1 = m_hold2 = false;
+    m_clickLock1 = m_clickLock2 = 0;
     // When safe mode is on, veto the save so no progress/new best/stars are stored.
     return m_enabled && m_safeMode;
 }
@@ -114,6 +118,7 @@ bool BotController::onCompleteLevel() {
 void BotController::onLeaveLevel() {
     m_layer = nullptr;
     m_hold1 = m_hold2 = false;
+    m_clickLock1 = m_clickLock2 = 0;
 }
 
 PlayerFrame BotController::snapshot(PlayerObject* player) const {
@@ -193,22 +198,33 @@ gd::vector<Cell> BotController::scan(PlayLayer* pl, float xMin, float xMax) cons
     return out;
 }
 
-void BotController::applyInput(PlayerObject* player, bool hold, bool* wasHolding) {
+void BotController::applyInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock) {
     if (!player) return;
     if (player->m_isDead) {
+        lock = 0;
         if (*wasHolding) {
             player->releaseButton(PlayerButton::Jump);
             *wasHolding = false;
         }
         return;
     }
-    if (hold && !*wasHolding) {
+    if (*wasHolding == hold) return;
+    if (lock > 0) return;
+    // Transition with a minimum gap so the click sound plays naturally.
+    constexpr int CLICK_GAP = 2;
+    if (hold) {
         player->pushButton(PlayerButton::Jump);
         *wasHolding = true;
-    } else if (!hold && *wasHolding) {
+    } else {
         player->releaseButton(PlayerButton::Jump);
         *wasHolding = false;
     }
+    if (lock < CLICK_GAP) lock = CLICK_GAP;
+}
+
+void BotController::tickInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock) {
+    if (lock > 0) --lock;
+    applyInput(player, hold, wasHolding, lock);
 }
 
 void BotController::calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal) {
@@ -232,7 +248,7 @@ void BotController::tickPlayer(PlayLayer* pl, PlayerObject* player, float lookah
     calibrate(cur, m_p1Prev, m_cal1);
 
     if (cur.dead) {
-        applyInput(player, false, &m_hold1);
+        tickInput(player, false, &m_hold1, m_clickLock1);
         m_p1Prev = cur;
         return;
     }
@@ -242,7 +258,7 @@ void BotController::tickPlayer(PlayLayer* pl, PlayerObject* player, float lookah
     m_cells1 = scan(pl, xMin, xMax);
 
     bool wantHold = m_engine->decide(cur, m_cells1);
-    applyInput(player, wantHold, &m_hold1);
+    tickInput(player, wantHold, &m_hold1, m_clickLock1);
     m_p1Prev = cur;
 }
 
@@ -255,8 +271,8 @@ void BotController::tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p
     bool dead1 = s1.dead;
     bool dead2 = p2 ? s2.dead : false;
     if (dead1 || dead2) {
-        applyInput(p1, false, &m_hold1);
-        if (p2) applyInput(p2, false, &m_hold2);
+        tickInput(p1, false, &m_hold1, m_clickLock1);
+        if (p2) tickInput(p2, false, &m_hold2, m_clickLock2);
         m_p1Prev = s1;
         if (p2) m_p2Prev = s2;
         return;
@@ -285,8 +301,8 @@ void BotController::tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p
         }
     }
 
-    applyInput(p1, bestAction, &m_hold1);
-    if (p2) applyInput(p2, bestAction, &m_hold2);
+    tickInput(p1, bestAction, &m_hold1, m_clickLock1);
+    if (p2) tickInput(p2, bestAction, &m_hold2, m_clickLock2);
     m_p1Prev = s1;
     if (p2) m_p2Prev = s2;
 }

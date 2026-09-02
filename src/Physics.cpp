@@ -217,8 +217,7 @@ static PlayerFrame place(PlayerFrame const& f, gd::vector<Cell> const& cells, bo
     return n;
 }
 
-void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX) {
-    for (auto const& c : cells) {
+void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX) {    for (auto const& c : cells) {
         if (c.kind != CellKind::Portal) continue;
         if (prevX <= c.rect.getMidX() && f.x > c.rect.getMidX()) {
             switch (c.portal) {
@@ -274,6 +273,14 @@ SimResult simulate(PlayerFrame const& start, gd::vector<Cell> const& cells, floa
     r.framesRun = guard;
     r.progressX = f.x - start.x;
     return r;
+}
+
+void stepSim(PlayerFrame const& in, bool input, Calibration const& cal, gd::vector<Cell> const& cells,
+             PlayerFrame& out, bool& died) {
+    PlayerFrame next = singleStep(in, input, cal);
+    applyPortals(next, cells, in.x);
+    died = false;
+    out = place(next, cells, died);
 }
 
 } // namespace bot
