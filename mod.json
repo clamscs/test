@@ -15,7 +15,7 @@
 		"url": "https://github.com/yourname/AutoBot/issues"
 	},
 	"tags": ["utility", "bot", "gameplay"],
-	"dependencies": [],
+	"dependencies": {},
 	"settings": {
 		"enabled": {
 			"name": "Enabled",
