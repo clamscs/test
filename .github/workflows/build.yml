@@ -34,8 +34,6 @@ jobs:
         with:
           combine: true
           target: ${{ matrix.config.target }}
-          bindings: geode-sdk/bindings
-          bindings-ref: 2.2081
 
   package:
     name: Package builds
