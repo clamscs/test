@@ -25,12 +25,12 @@ class $modify(PlayLayer) {
         bot::BotController::get().onResetLevel(this);
     }
 
-    void levelComplete() override {
+    void levelComplete() {
         bot::BotController::get().onCompleteLevel();
         PlayLayer::levelComplete();
     }
 
-    void onQuit() override {
+    void onQuit() {
         bot::BotController::get().onLeaveLevel();
         PlayLayer::onQuit();
     }
