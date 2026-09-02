@@ -15,51 +15,31 @@ constexpr float UNIT_PER_BLOCK = 30.0f;
 constexpr float BASE_X_SPEED = 10.386f * UNIT_PER_BLOCK;
 
 enum class Mode : uint8_t {
-    Cube,
-    Ship,
-    Ball,
-    Ufo,
-    Wave,
-    Robot,
-    Spider,
-    Swing,
+    Cube, Ship, Ball, Ufo, Wave, Robot, Spider, Swing,
 };
 
 enum class CellKind : uint8_t {
-    None,
-    Solid,
-    Hazard,
-    Pad,
-    Orb,
-    Ring,
-    Portal,
+    None, Solid, Hazard, Pad, Orb, Portal,
 };
 
 enum class PortalKind : uint8_t {
+    None, GravitySwap, Mini, Normal, Dual, Solo, Teleport,
+    Cube, Ship, Ball, Ufo, Wave, Robot, Spider, Swing,
+};
+
+enum class OrbPadType : uint8_t {
     None,
-    GravitySwap,
-    Mini,
-    Normal,
-    Dual,
-    Solo,
-    Teleport,
-    Cube,
-    Ship,
-    Ball,
-    Ufo,
-    Wave,
-    Robot,
-    Spider,
-    Swing,
-    Speed,
+    Yellow, Pink, Red, Green, Gravity, Dash, Spider,
 };
 
 struct Cell {
     cocos2d::CCRect rect;
     CellKind kind = CellKind::None;
+    OrbPadType orbPadType = OrbPadType::None;
     uint16_t id = 0;
     PortalKind portal = PortalKind::None;
-    float portalParam = 0.0f;
+    bool isPad() const { return kind == CellKind::Pad; }
+    bool isOrb() const { return kind == CellKind::Orb; }
 };
 
 struct PlayerFrame {
@@ -78,21 +58,37 @@ struct PlayerFrame {
 };
 
 struct Calibration {
-    float gravity = 0.0f;
-    float jumpV = 0.0f;
-    float fallCap = 0.0f;
+    float gravity = 2370.0f;
+    float jumpV = 604.5f;
+    float fallCap = 903.6f;
     float speedX = BASE_X_SPEED;
     bool initialized = false;
-
     void reset();
-    void observe(PlayerFrame const& cur, PlayerFrame const& prev);
 };
 
-class Strategy {
-public:
-    virtual ~Strategy() = default;
-    virtual bool tick(PlayerFrame const& state, gd::vector<Cell> const& cells, float lookahead) = 0;
-    virtual Mode mode() const = 0;
+struct PlanSegment {
+    float xStart;
+    bool hold;
+};
+
+struct Plan {
+    gd::vector<PlanSegment> segments;
+    float xStart = 0.0f;
+    float xEnd = 0.0f;
+    bool valid = false;
+
+    void reset() { segments.clear(); xStart = 0.0f; xEnd = 0.0f; valid = false; }
+
+    bool holdAt(float x) const {
+        if (segments.empty()) return false;
+        int lo = 0, hi = static_cast<int>(segments.size()) - 1;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (segments[mid].xStart <= x) lo = mid;
+            else hi = mid - 1;
+        }
+        return segments[lo].hold;
+    }
 };
 
 class DecisionEngine;
@@ -111,23 +107,20 @@ public:
     void setSafeMode(bool v);
     bool safeMode() const { return m_safeMode; }
     bool safeModeActive() const { return m_enabled && m_safeMode; }
-    float lookaheadBlocks() const;
     void toggleEnabled();
     void toggleSafeMode();
     void cycleLookahead();
+    float lookaheadBlocks() const { return m_lookahead; }
 
     PlayLayer* currentLayer() const { return m_layer; }
-
     void syncSettingsFromMod();
 
 private:
-    void tickPlayer(PlayLayer* pl, PlayerObject* player, float lookahead);
-    void tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p2, float lookahead);
-    PlayerFrame snapshot(PlayerObject* player) const;
-    void calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal);
     gd::vector<Cell> scan(PlayLayer* pl, float xMin, float xMax) const;
-    void applyInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock);
-    void tickInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock);
+    PlayerFrame snapshot(PlayerObject* player) const;
+    bool ensurePlan(PlayLayer* pl);
+    void buildPlanWindow(PlayLayer* pl, PlayerFrame const& start, float toX);
+    void applyHold(PlayerObject* player, bool hold, bool* wasHolding, int* lock);
 
     BotController() = default;
 
@@ -136,19 +129,14 @@ private:
     bool m_safeMode = true;
     float m_lookahead = 5.0f;
 
-    PlayerFrame m_p1Prev{};
-    PlayerFrame m_p2Prev{};
-    Calibration m_cal1;
-    Calibration m_cal2;
-
     bool m_hold1 = false;
     bool m_hold2 = false;
-    int m_clickLock1 = 0;
-    int m_clickLock2 = 0;
+    int m_lock1 = 0;
+    int m_lock2 = 0;
 
+    Plan m_plan;
+    gd::vector<Cell> m_cells;
     DecisionEngine* m_engine = nullptr;
-    gd::vector<Cell> m_cells1;
-    gd::vector<Cell> m_cells2;
 };
 
 } // namespace bot

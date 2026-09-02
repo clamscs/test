@@ -8,6 +8,7 @@
 namespace bot {
 
 static constexpr float GAME_HEIGHT = 580.0f;
+static constexpr float PLAN_MARGIN = 4.0f * UNIT_PER_BLOCK;
 
 BotController& BotController::get() {
     static BotController inst;
@@ -19,11 +20,13 @@ void BotController::setEnabled(bool v) {
     m_enabled = v;
     if (m_enabled) {
         m_hold1 = m_hold2 = false;
+        m_lock1 = m_lock2 = 0;
+        m_plan.reset();
     } else if (m_layer) {
         if (m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
         if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
         m_hold1 = m_hold2 = false;
-        m_clickLock1 = m_clickLock2 = 0;
+        m_lock1 = m_lock2 = 0;
     }
 }
 
@@ -49,11 +52,8 @@ void BotController::cycleLookahead() {
     cur += 1;
     if (cur > 10) cur = 2;
     m_lookahead = static_cast<float>(cur);
+    m_plan.reset();
     Mod::get()->setSettingValue<int64_t>("lookahead-blocks", cur);
-}
-
-float BotController::lookaheadBlocks() const {
-    return m_lookahead;
 }
 
 void BotController::syncSettingsFromMod() {
@@ -63,9 +63,29 @@ void BotController::syncSettingsFromMod() {
         if (m_layer && m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
         if (m_layer && m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
         m_hold1 = m_hold2 = false;
+        m_lock1 = m_lock2 = 0;
     }
     m_safeMode = Mod::get()->getSettingValue<bool>("auto-safe-mode");
     m_lookahead = static_cast<float>(Mod::get()->getSettingValue<int64_t>("lookahead-blocks"));
+}
+
+void BotController::applyHold(PlayerObject* player, bool hold, bool* wasHolding, int* lock) {
+    if (!player) return;
+    if (player->m_isDead) {
+        *lock = 0;
+        if (*wasHolding) {
+            player->releaseButton(PlayerButton::Jump);
+            *wasHolding = false;
+        }
+        return;
+    }
+    if (*wasHolding == hold) return;
+    if (*lock > 0) { --*lock; return; }
+    constexpr int CLICK_GAP = 2;
+    if (hold) player->pushButton(PlayerButton::Jump);
+    else player->releaseButton(PlayerButton::Jump);
+    *wasHolding = hold;
+    *lock = CLICK_GAP;
 }
 
 void BotController::onUpdate(PlayLayer* playLayer, float dt) {
@@ -73,35 +93,39 @@ void BotController::onUpdate(PlayLayer* playLayer, float dt) {
 
     if (m_layer != playLayer) {
         m_hold1 = m_hold2 = false;
-        m_clickLock1 = m_clickLock2 = 0;
+        m_lock1 = m_lock2 = 0;
         m_layer = playLayer;
-        m_p1Prev = PlayerFrame{};
-        m_p2Prev = PlayerFrame{};
-        m_cal1.reset();
-        m_cal2.reset();
+        m_plan.reset();
         syncSettingsFromMod();
         bool autoStart = Mod::get()->getSettingValue<bool>("auto-enable-at-start");
         if (autoStart) m_enabled = true;
     }
 
-    if (m_enabled) {
-        if (!m_engine) m_engine = new DecisionEngine(m_lookahead);
-        m_engine->setLookahead(m_lookahead);
+    if (!m_enabled) return;
 
-        bool dual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2;
-        if (dual) {
-            tickUnified(playLayer, playLayer->m_player1, playLayer->m_player2, m_lookahead);
-        } else {
-            tickPlayer(playLayer, playLayer->m_player1, m_lookahead);
-        }
+    if (!m_engine) m_engine = new DecisionEngine(m_lookahead);
+    m_engine->setLookahead(m_lookahead);
+
+    ensurePlan(playLayer);
+
+    PlayerObject* p1 = playLayer->m_player1;
+    if (!p1) return;
+
+    bool dual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2;
+    bool hold = m_plan.valid ? m_plan.holdAt(p1->getPositionX()) : false;
+
+    applyHold(p1, hold, &m_hold1, &m_lock1);
+    if (dual) {
+        applyHold(playLayer->m_player2, hold, &m_hold2, &m_lock2);
+    } else if (m_hold2 && playLayer->m_player2) {
+        applyHold(playLayer->m_player2, false, &m_hold2, &m_lock2);
     }
 }
 
 void BotController::onResetLevel(PlayLayer*) {
     m_hold1 = m_hold2 = false;
-    m_clickLock1 = m_clickLock2 = 0;
-    m_p1Prev = PlayerFrame{};
-    m_p2Prev = PlayerFrame{};
+    m_lock1 = m_lock2 = 0;
+    m_plan.reset();
 }
 
 bool BotController::onCompleteLevel() {
@@ -110,15 +134,16 @@ bool BotController::onCompleteLevel() {
         if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
     }
     m_hold1 = m_hold2 = false;
-    m_clickLock1 = m_clickLock2 = 0;
-    // When safe mode is on, veto the save so no progress/new best/stars are stored.
+    m_lock1 = m_lock2 = 0;
+    m_plan.reset();
     return m_enabled && m_safeMode;
 }
 
 void BotController::onLeaveLevel() {
     m_layer = nullptr;
     m_hold1 = m_hold2 = false;
-    m_clickLock1 = m_clickLock2 = 0;
+    m_lock1 = m_lock2 = 0;
+    m_plan.reset();
 }
 
 PlayerFrame BotController::snapshot(PlayerObject* player) const {
@@ -153,6 +178,7 @@ gd::vector<Cell> BotController::scan(PlayLayer* pl, float xMin, float xMax) cons
                 break;
             case GameObjectType::Hazard:
             case GameObjectType::AnimatedHazard:
+            case GameObjectType::Breakable:
                 cell.kind = CellKind::Hazard;
                 break;
             case GameObjectType::InverseGravityPortal:
@@ -184,6 +210,42 @@ gd::vector<Cell> BotController::scan(PlayLayer* pl, float xMin, float xMax) cons
                     default: break;
                 }
                 break;
+            case GameObjectType::YellowJumpPad:
+            case GameObjectType::PinkJumpPad:
+            case GameObjectType::GravityPad:
+            case GameObjectType::RedJumpPad:
+            case GameObjectType::SpiderPad:
+                cell.kind = CellKind::Pad;
+                switch (type) {
+                    case GameObjectType::YellowJumpPad: cell.orbPadType = OrbPadType::Yellow; break;
+                    case GameObjectType::PinkJumpPad: cell.orbPadType = OrbPadType::Pink; break;
+                    case GameObjectType::GravityPad: cell.orbPadType = OrbPadType::Gravity; break;
+                    case GameObjectType::RedJumpPad: cell.orbPadType = OrbPadType::Red; break;
+                    case GameObjectType::SpiderPad: cell.orbPadType = OrbPadType::Spider; break;
+                    default: break;
+                }
+                break;
+            case GameObjectType::YellowJumpRing:
+            case GameObjectType::PinkJumpRing:
+            case GameObjectType::GravityRing:
+            case GameObjectType::GreenRing:
+            case GameObjectType::RedJumpRing:
+            case GameObjectType::DashRing:
+            case GameObjectType::SpiderOrb:
+            case GameObjectType::TeleportOrb:
+                cell.kind = CellKind::Orb;
+                switch (type) {
+                    case GameObjectType::YellowJumpRing: cell.orbPadType = OrbPadType::Yellow; break;
+                    case GameObjectType::PinkJumpRing: cell.orbPadType = OrbPadType::Pink; break;
+                    case GameObjectType::GravityRing: cell.orbPadType = OrbPadType::Gravity; break;
+                    case GameObjectType::GreenRing: cell.orbPadType = OrbPadType::Green; break;
+                    case GameObjectType::RedJumpRing: cell.orbPadType = OrbPadType::Red; break;
+                    case GameObjectType::DashRing: cell.orbPadType = OrbPadType::Dash; break;
+                    case GameObjectType::SpiderOrb: cell.orbPadType = OrbPadType::Spider; break;
+                    case GameObjectType::TeleportOrb: cell.orbPadType = OrbPadType::None; break;
+                    default: break;
+                }
+                break;
             default:
                 continue;
         }
@@ -198,113 +260,56 @@ gd::vector<Cell> BotController::scan(PlayLayer* pl, float xMin, float xMax) cons
     return out;
 }
 
-void BotController::applyInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock) {
-    if (!player) return;
-    if (player->m_isDead) {
-        lock = 0;
-        if (*wasHolding) {
-            player->releaseButton(PlayerButton::Jump);
-            *wasHolding = false;
+bool BotController::ensurePlan(PlayLayer* pl) {
+    if (!m_engine) return false;
+    PlayerObject* p1 = pl->m_player1;
+    if (!p1 || p1->m_isDead) return false;
+
+    PlayerFrame f = snapshot(p1);
+    if (!m_plan.valid || f.x >= m_plan.xEnd - PLAN_MARGIN) {
+        float toX = f.x + (m_lookahead * 3.0f + 2.0f) * UNIT_PER_BLOCK;
+        buildPlanWindow(pl, f, toX);
+    }
+    return m_plan.valid;
+}
+
+void BotController::buildPlanWindow(PlayLayer* pl, PlayerFrame const& start, float toX) {
+    m_plan.reset();
+    m_cells = scan(pl, start.x - 3.0f * UNIT_PER_BLOCK, toX + 2.0f * UNIT_PER_BLOCK);
+
+    Calibration cal;
+    cal.speedX = start.speedX > 0.0f ? start.speedX : BASE_X_SPEED;
+    cal.gravity = 2370.0f;
+    cal.jumpV = 604.5f;
+    cal.fallCap = 903.6f;
+
+    PlayerFrame f = start;
+    f.dead = false;
+
+    bool hold = m_hold1;
+    m_plan.xStart = start.x;
+    m_plan.segments.clear();
+    m_plan.segments.push_back({f.x, hold});
+
+    int guard = 0;
+    while (f.x < toX && !f.dead && guard < 2400) {
+        guard++;
+        bool want = m_engine->decide(f, m_cells);
+        if (want != hold) {
+            hold = want;
+            m_plan.segments.push_back({f.x, hold});
         }
-        return;
-    }
-    if (*wasHolding == hold) return;
-    if (lock > 0) return;
-    // Transition with a minimum gap so the click sound plays naturally.
-    constexpr int CLICK_GAP = 2;
-    if (hold) {
-        player->pushButton(PlayerButton::Jump);
-        *wasHolding = true;
-    } else {
-        player->releaseButton(PlayerButton::Jump);
-        *wasHolding = false;
-    }
-    if (lock < CLICK_GAP) lock = CLICK_GAP;
-}
-
-void BotController::tickInput(PlayerObject* player, bool hold, bool* wasHolding, int& lock) {
-    if (lock > 0) --lock;
-    applyInput(player, hold, wasHolding, lock);
-}
-
-void BotController::calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal) {
-    if (prev.x > 0.0f) {
-        float ddx = cur.x - prev.x;
-        if (ddx > 0.0f && ddx < 3.0f * UNIT_PER_BLOCK) {
-            cur.speedX = ddx / DT;
-        } else {
-            cur.speedX = cal.speedX;
+        bool died = false;
+        PlayerFrame next;
+        stepSim(f, hold, cal, m_cells, next, died);
+        if (died) {
+            f.dead = true;
+            break;
         }
-    } else {
-        cur.speedX = cal.speedX > 0.0f ? cal.speedX : BASE_X_SPEED;
+        f = next;
     }
-    cal.observe(cur, prev);
-}
-
-void BotController::tickPlayer(PlayLayer* pl, PlayerObject* player, float lookahead) {
-    if (!player) return;
-
-    PlayerFrame cur = snapshot(player);
-    calibrate(cur, m_p1Prev, m_cal1);
-
-    if (cur.dead) {
-        tickInput(player, false, &m_hold1, m_clickLock1);
-        m_p1Prev = cur;
-        return;
-    }
-
-    float xMin = cur.x - 3.0f * UNIT_PER_BLOCK;
-    float xMax = cur.x + (lookahead + 2.0f) * UNIT_PER_BLOCK;
-    m_cells1 = scan(pl, xMin, xMax);
-
-    bool wantHold = m_engine->decide(cur, m_cells1);
-    tickInput(player, wantHold, &m_hold1, m_clickLock1);
-    m_p1Prev = cur;
-}
-
-void BotController::tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p2, float lookahead) {
-    PlayerFrame s1 = snapshot(p1);
-    calibrate(s1, m_p1Prev, m_cal1);
-    PlayerFrame s2 = p2 ? snapshot(p2) : s1;
-    if (p2) calibrate(s2, m_p2Prev, m_cal2);
-
-    bool dead1 = s1.dead;
-    bool dead2 = p2 ? s2.dead : false;
-    if (dead1 || dead2) {
-        tickInput(p1, false, &m_hold1, m_clickLock1);
-        if (p2) tickInput(p2, false, &m_hold2, m_clickLock2);
-        m_p1Prev = s1;
-        if (p2) m_p2Prev = s2;
-        return;
-    }
-
-    float xMin = s1.x - 3.0f * UNIT_PER_BLOCK;
-    float xMax = s1.x + (lookahead + 2.0f) * UNIT_PER_BLOCK;
-    m_cells1 = scan(pl, xMin, xMax);
-    m_cells2 = m_cells1;
-    if (p2) {
-        xMin = s2.x - 3.0f * UNIT_PER_BLOCK;
-        xMax = s2.x + (lookahead + 2.0f) * UNIT_PER_BLOCK;
-        m_cells2 = scan(pl, xMin, xMax);
-    }
-
-    bool bestAction = false;
-    float bestProgress = -1.0f;
-    for (bool o : {false, true}) {
-        SimResult r1 = simulate(s1, m_cells1, lookahead, o);
-        SimResult r2 = p2 ? simulate(s2, m_cells2, lookahead, o) : r1;
-        bool ok = !r1.died && !r2.died;
-        float prog = ok ? std::min(r1.progressX, r2.progressX) : -1.0f;
-        if (prog > bestProgress) {
-            bestAction = o;
-            bestProgress = prog;
-        }
-    }
-
-    tickInput(p1, bestAction, &m_hold1, m_clickLock1);
-    if (p2) tickInput(p2, bestAction, &m_hold2, m_clickLock2);
-    m_p1Prev = s1;
-    if (p2) m_p2Prev = s2;
+    m_plan.xEnd = f.x;
+    m_plan.valid = guard > 1 && !f.dead;
 }
 
 } // namespace bot

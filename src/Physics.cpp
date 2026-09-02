@@ -13,11 +13,6 @@ void Calibration::reset() {
     initialized = false;
 }
 
-void Calibration::observe(PlayerFrame const& cur, PlayerFrame const& prev) {
-    speedX = cur.speedX;
-    initialized = true;
-}
-
 static bool intersects(cocos2d::CCRect const& a, cocos2d::CCRect const& b) {
     return a.getMaxX() > b.getMinX() && a.getMinX() < b.getMaxX() &&
            a.getMaxY() > b.getMinY() && a.getMinY() < b.getMaxY();
@@ -122,7 +117,6 @@ static PlayerFrame singleStep(PlayerFrame const& f, bool input, Calibration cons
         }
 
         case Mode::Wave: {
-            // Wave moves in fixed 45-degree diagonals. Holding goes up, releasing goes down.
             float mag = cal.speedX > 0.0f ? cal.speedX : BASE_X_SPEED;
             if (input) n.vy = dir * mag * 0.6f;
             else n.vy = -dir * mag * 0.6f;
@@ -139,7 +133,6 @@ static PlayerFrame singleStep(PlayerFrame const& f, bool input, Calibration cons
 static bool solidUnder(PlayerFrame const& f, PlayerFrame const& next, gd::vector<Cell> const& cells, bool upsideDown) {
     float hw = next.halfW();
     float hh = next.halfH();
-    float checkY = upsideDown ? next.y + hh : next.y - hh;
     for (auto const& c : cells) {
         if (c.kind != CellKind::Solid) continue;
         if (c.rect.getMaxX() <= next.x - hw || c.rect.getMinX() >= next.x + hw) continue;
@@ -207,29 +200,18 @@ static PlayerFrame place(PlayerFrame const& f, gd::vector<Cell> const& cells, bo
         }
     }
 
-    if (f.vy >= 0.0f && !n.upsideDown) {
-        n.y = n.y - (n.y - hh - (f.y - hh)) + 0.01f;
-    }
-    if (f.vy <= 0.0f && n.upsideDown) {
-        n.y = n.y + ((f.y + hh) - (n.y + hh)) + 0.01f;
-    }
     died = true;
     return n;
 }
 
-void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX) {    for (auto const& c : cells) {
+static void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX) {
+    for (auto const& c : cells) {
         if (c.kind != CellKind::Portal) continue;
         if (prevX <= c.rect.getMidX() && f.x > c.rect.getMidX()) {
             switch (c.portal) {
-                case PortalKind::GravitySwap:
-                    f.upsideDown = !f.upsideDown;
-                    break;
-                case PortalKind::Mini:
-                    f.scale = 0.5f;
-                    break;
-                case PortalKind::Normal:
-                    f.scale = 1.0f;
-                    break;
+                case PortalKind::GravitySwap: f.upsideDown = !f.upsideDown; break;
+                case PortalKind::Mini: f.scale = 0.5f; break;
+                case PortalKind::Normal: f.scale = 1.0f; break;
                 case PortalKind::Cube: f.mode = Mode::Cube; break;
                 case PortalKind::Ship: f.mode = Mode::Ship; break;
                 case PortalKind::Ball: f.mode = Mode::Ball; break;
@@ -244,41 +226,60 @@ void applyPortals(PlayerFrame& f, gd::vector<Cell> const& cells, float prevX) { 
     }
 }
 
-SimResult simulate(PlayerFrame const& start, gd::vector<Cell> const& cells, float lookahead, bool hold) {
-    Calibration cal;
-    cal.speedX = start.speedX;
-    cal.gravity = 2370.0f;
-    cal.jumpV = 604.5f;
-    cal.fallCap = 903.6f;
+// Orb/pad triggers. Pads fire automatically on contact; orbs/rings only fire
+// while the player is holding the button. Effects are applied immediately.
+static void applyOrbsPads(PlayerFrame& n, PlayerFrame const& prev, gd::vector<Cell> const& cells, bool input) {
+    float hw = n.halfW();
+    float hh = n.halfH();
+    cocos2d::CCRect pb(n.x - hw, n.y - hh, hw * 2.0f, hh * 2.0f);
 
-    PlayerFrame f = start;
-    f.dead = false;
-    SimResult r;
-    r.final = f;
-    float xEnd = start.x + lookahead * UNIT_PER_BLOCK;
-    int guard = 0;
-    while (f.x < xEnd && !r.died && guard < 400) {
-        guard++;
-        PlayerFrame next = singleStep(f, hold, cal);
-        applyPortals(next, cells, f.x);
-        bool died = false;
-        PlayerFrame placed = place(next, cells, died);
-        if (died) {
-            r.died = true;
-            break;
+    for (auto const& c : cells) {
+        if (c.kind != CellKind::Pad && c.kind != CellKind::Orb) continue;
+        bool isPad = (c.kind == CellKind::Pad);
+
+        bool trigger = false;
+        if (isPad) {
+            trigger = intersects(pb, c.rect);
+        } else {
+            if (!input) continue;
+            trigger = prev.x <= c.rect.getMidX() && n.x > c.rect.getMidX();
         }
-        f = placed;
+        if (!trigger) continue;
+
+        float dir = n.upsideDown ? -1.0f : 1.0f;
+        n.onGround = false;
+        switch (c.orbPadType) {
+            case OrbPadType::Yellow:
+            case OrbPadType::Green:
+                n.vy = dir * 604.5f;
+                break;
+            case OrbPadType::Pink:
+                n.vy = dir * 720.0f;
+                break;
+            case OrbPadType::Dash:
+                n.vy = dir * 660.0f;
+                break;
+            case OrbPadType::Red:
+                n.vy = dir * 1000.0f;
+                break;
+            case OrbPadType::Spider:
+                n.vy = dir * 700.0f;
+                break;
+            case OrbPadType::Gravity:
+                n.upsideDown = !n.upsideDown;
+                n.vy = 0.0f;
+                break;
+            default:
+                break;
+        }
     }
-    r.final = f;
-    r.framesRun = guard;
-    r.progressX = f.x - start.x;
-    return r;
 }
 
 void stepSim(PlayerFrame const& in, bool input, Calibration const& cal, gd::vector<Cell> const& cells,
              PlayerFrame& out, bool& died) {
     PlayerFrame next = singleStep(in, input, cal);
     applyPortals(next, cells, in.x);
+    applyOrbsPads(next, in, cells, input);
     died = false;
     out = place(next, cells, died);
 }
