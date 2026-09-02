@@ -16,6 +16,7 @@ private:
     bool survive(bool hold, PlayerFrame const& s, gd::vector<Cell> const& c, SimResult& out) const;
     bool targetAltitude(PlayerFrame const& s, gd::vector<Cell> const& c, float& targetY) const;
     float corridorCenter(PlayerFrame const& s, gd::vector<Cell> const& c) const;
+    bool aim(float targetY, PlayerFrame const& s, gd::vector<Cell> const& cells, bool preferHold) const;
 
     float m_lookahead;
 };

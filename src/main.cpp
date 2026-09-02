@@ -51,7 +51,7 @@ static void setLabelText(cocos2d::CCNode* btn, const char* text) {
     }
 }
 
-class $modify(PauseLayer) {
+class $modify(PAUSEBot, PauseLayer) {
     struct Fields {
         CCMenuItem* m_botBtn = nullptr;
         CCMenuItem* m_safeBtn = nullptr;
@@ -97,9 +97,9 @@ class $modify(PauseLayer) {
             return btn;
         };
 
-        m_fields->m_botBtn = makeBtn("BOT: OFF", menu_selector(PauseLayer::onBotToggle), {135.0f, 105.0f});
-        m_fields->m_safeBtn = makeBtn("SAFE: ON", menu_selector(PauseLayer::onSafeToggle), {135.0f, 75.0f});
-        m_fields->m_lookBtn = makeBtn("LOOK: 5", menu_selector(PauseLayer::onLookToggle), {135.0f, 45.0f});
+        m_fields->m_botBtn = makeBtn("BOT: OFF", menu_selector(PAUSEBot::onBotToggle), {135.0f, 105.0f});
+        m_fields->m_safeBtn = makeBtn("SAFE: ON", menu_selector(PAUSEBot::onSafeToggle), {135.0f, 75.0f});
+        m_fields->m_lookBtn = makeBtn("LOOK: 5", menu_selector(PAUSEBot::onLookToggle), {135.0f, 45.0f});
 
         this->addChild(menu, 20);
         refreshLabels();
