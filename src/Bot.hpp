@@ -123,7 +123,7 @@ private:
     void tickPlayer(PlayLayer* pl, PlayerObject* player, float lookahead);
     void tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p2, float lookahead);
     PlayerFrame snapshot(PlayerObject* player) const;
-    void calibrate(PlayerFrame const& cur, PlayerFrame& prev, Calibration& cal);
+    void calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal);
     gd::vector<Cell> scan(PlayLayer* pl, float xMin, float xMax) const;
     void applyInput(PlayerObject* player, bool hold, bool* wasHolding);
     void buildOverlay();

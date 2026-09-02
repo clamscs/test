@@ -228,7 +228,7 @@ void BotController::applyInput(PlayerObject* player, bool hold, bool* wasHolding
     }
 }
 
-void BotController::calibrate(PlayerFrame const& cur, PlayerFrame& prev, Calibration& cal) {
+void BotController::calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal) {
     if (prev.x > 0.0f) {
         float ddx = cur.x - prev.x;
         if (ddx > 0.0f && ddx < 3.0f * UNIT_PER_BLOCK) {
