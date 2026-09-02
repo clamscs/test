@@ -122,8 +122,10 @@ static PlayerFrame singleStep(PlayerFrame const& f, bool input, Calibration cons
         }
 
         case Mode::Wave: {
-            float mag = n.speedX;
-            n.vy = (input ? dir : -dir) * mag;
+            // Wave moves in fixed 45-degree diagonals. Holding goes up, releasing goes down.
+            float mag = cal.speedX > 0.0f ? cal.speedX : BASE_X_SPEED;
+            if (input) n.vy = dir * mag * 0.6f;
+            else n.vy = -dir * mag * 0.6f;
             break;
         }
     }

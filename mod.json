@@ -25,13 +25,7 @@
 		},
 		"auto-safe-mode": {
 			"name": "Auto Safe Mode",
-			"description": "Aktif otomatis saat bot nyala. Progress level (new best, stars, attempts) tidak masuk/menambah.",
-			"type": "bool",
-			"default": true
-		},
-		"show-gui": {
-			"name": "Show GUI",
-			"description": "Tampilkan overlay panel kecil di dalam level.",
+			"description": "Aktif otomatis saat bot nyala. Progress level (new best, stars) tidak masuk/menambah.",
 			"type": "bool",
 			"default": true
 		},

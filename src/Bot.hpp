@@ -103,7 +103,7 @@ public:
 
     void onUpdate(PlayLayer* playLayer, float dt);
     void onResetLevel(PlayLayer* playLayer);
-    void onCompleteLevel();
+    bool onCompleteLevel();
     void onLeaveLevel();
 
     void setEnabled(bool v);
@@ -111,37 +111,29 @@ public:
     void setSafeMode(bool v);
     bool safeMode() const { return m_safeMode; }
     bool safeModeActive() const { return m_enabled && m_safeMode; }
+    float lookaheadBlocks() const;
+    void toggleEnabled();
+    void toggleSafeMode();
+    void cycleLookahead();
 
     PlayLayer* currentLayer() const { return m_layer; }
 
-    void drawGUI(bool v);
-    bool shouldDrawGUI() const { return m_showGUI; }
+    void syncSettingsFromMod();
 
 private:
-    void resetAttempts();
-    void updateSafeModeLock();
     void tickPlayer(PlayLayer* pl, PlayerObject* player, float lookahead);
     void tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p2, float lookahead);
     PlayerFrame snapshot(PlayerObject* player) const;
     void calibrate(PlayerFrame cur, PlayerFrame& prev, Calibration& cal);
     gd::vector<Cell> scan(PlayLayer* pl, float xMin, float xMax) const;
     void applyInput(PlayerObject* player, bool hold, bool* wasHolding);
-    void buildOverlay();
-    void refreshOverlay();
-    void destroyOverlay();
-    void onToggleBot(CCObject*);
-    void onToggleSafe(CCObject*);
 
     BotController() = default;
 
     PlayLayer* m_layer = nullptr;
     bool m_enabled = false;
     bool m_safeMode = true;
-    bool m_showGUI = true;
-    bool m_practiceBackupValid = false;
-    bool m_practiceBackup = false;
-
-    int m_attemptSnapshot = 0;
+    float m_lookahead = 5.0f;
 
     PlayerFrame m_p1Prev{};
     PlayerFrame m_p2Prev{};
@@ -154,10 +146,6 @@ private:
     DecisionEngine* m_engine = nullptr;
     gd::vector<Cell> m_cells1;
     gd::vector<Cell> m_cells2;
-
-    cocos2d::CCLayerColor* m_overlay = nullptr;
-    cocos2d::CCLabelBMFont* m_botLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_safeLabel = nullptr;
 };
 
 } // namespace bot

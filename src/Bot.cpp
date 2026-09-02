@@ -17,96 +17,82 @@ BotController& BotController::get() {
 void BotController::setEnabled(bool v) {
     if (m_enabled == v) return;
     m_enabled = v;
-    if (!m_enabled) {
-        if (m_layer) {
-            if (m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
-            if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
-        }
+    if (m_enabled) {
         m_hold1 = m_hold2 = false;
-        updateSafeModeLock();
+    } else if (m_layer) {
+        if (m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
+        if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
+        m_hold1 = m_hold2 = false;
     }
-    refreshOverlay();
 }
 
 void BotController::setSafeMode(bool v) {
     if (m_safeMode == v) return;
     m_safeMode = v;
-    updateSafeModeLock();
-    refreshOverlay();
 }
 
-void BotController::updateSafeModeLock() {
-    if (!m_layer) return;
-    if (safeModeActive()) {
-        if (!m_practiceBackupValid) {
-            m_practiceBackup = m_layer->m_isPracticeMode;
-            m_practiceBackupValid = true;
-        }
-        m_layer->m_isPracticeMode = true;
-    } else if (m_practiceBackupValid) {
-        m_layer->m_isPracticeMode = m_practiceBackup;
-        m_practiceBackupValid = false;
-    }
+void BotController::toggleEnabled() {
+    bool next = !m_enabled;
+    setEnabled(next);
+    Mod::get()->setSettingValue<bool>("enabled", next);
 }
 
-void BotController::resetAttempts() {
-    if (!m_layer) return;
-    if (m_layer->m_attempts != m_attemptSnapshot) {
-        m_layer->m_attempts = m_attemptSnapshot;
+void BotController::toggleSafeMode() {
+    bool next = !m_safeMode;
+    setSafeMode(next);
+    Mod::get()->setSettingValue<bool>("auto-safe-mode", next);
+}
+
+void BotController::cycleLookahead() {
+    int cur = static_cast<int>(m_lookahead);
+    cur += 1;
+    if (cur > 10) cur = 2;
+    m_lookahead = static_cast<float>(cur);
+    Mod::get()->setSettingValue<int64_t>("lookahead-blocks", cur);
+}
+
+float BotController::lookaheadBlocks() const {
+    return m_lookahead;
+}
+
+void BotController::syncSettingsFromMod() {
+    bool master = Mod::get()->getSettingValue<bool>("enabled");
+    m_enabled = master;
+    if (!m_enabled) {
+        if (m_layer && m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
+        if (m_layer && m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
+        m_hold1 = m_hold2 = false;
     }
+    m_safeMode = Mod::get()->getSettingValue<bool>("auto-safe-mode");
+    m_lookahead = static_cast<float>(Mod::get()->getSettingValue<int64_t>("lookahead-blocks"));
 }
 
 void BotController::onUpdate(PlayLayer* playLayer, float dt) {
     if (!playLayer) return;
 
     if (m_layer != playLayer) {
-        if (m_enabled) {
-            m_hold1 = m_hold2 = false;
-        }
-        m_practiceBackupValid = false;
-        m_overlay = nullptr;
-        m_botLabel = nullptr;
-        m_safeLabel = nullptr;
+        m_hold1 = m_hold2 = false;
         m_layer = playLayer;
-        m_attemptSnapshot = playLayer->m_attempts;
         m_p1Prev = PlayerFrame{};
         m_p2Prev = PlayerFrame{};
         m_cal1.reset();
         m_cal2.reset();
-
-        bool master = Mod::get()->getSettingValue<bool>("enabled");
+        syncSettingsFromMod();
         bool autoStart = Mod::get()->getSettingValue<bool>("auto-enable-at-start");
-        m_enabled = master && autoStart;
-        updateSafeModeLock();
-    }
-
-    m_showGUI = Mod::get()->getSettingValue<bool>("show-gui");
-
-    if (safeModeActive()) {
-        resetAttempts();
-        updateSafeModeLock();
-    }
-
-    if (m_showGUI && !m_overlay) {
-        buildOverlay();
-    } else if (!m_showGUI && m_overlay) {
-        destroyOverlay();
+        if (autoStart) m_enabled = true;
     }
 
     if (m_enabled) {
-        float lookahead = static_cast<float>(Mod::get()->getSettingValue<int64_t>("lookahead-blocks"));
-        if (!m_engine) m_engine = new DecisionEngine(lookahead);
-        m_engine->setLookahead(lookahead);
+        if (!m_engine) m_engine = new DecisionEngine(m_lookahead);
+        m_engine->setLookahead(m_lookahead);
 
         bool dual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2;
         if (dual) {
-            tickUnified(playLayer, playLayer->m_player1, playLayer->m_player2, lookahead);
+            tickUnified(playLayer, playLayer->m_player1, playLayer->m_player2, m_lookahead);
         } else {
-            tickPlayer(playLayer, playLayer->m_player1, lookahead);
+            tickPlayer(playLayer, playLayer->m_player1, m_lookahead);
         }
     }
-
-    refreshOverlay();
 }
 
 void BotController::onResetLevel(PlayLayer*) {
@@ -115,21 +101,19 @@ void BotController::onResetLevel(PlayLayer*) {
     m_p2Prev = PlayerFrame{};
 }
 
-void BotController::onCompleteLevel() {
+bool BotController::onCompleteLevel() {
     if (m_layer) {
         if (m_hold1) m_layer->m_player1->releaseButton(PlayerButton::Jump);
         if (m_hold2 && m_layer->m_player2) m_layer->m_player2->releaseButton(PlayerButton::Jump);
     }
     m_hold1 = m_hold2 = false;
+    // When safe mode is on, veto the save so no progress/new best/stars are stored.
+    return m_enabled && m_safeMode;
 }
 
 void BotController::onLeaveLevel() {
     m_layer = nullptr;
-    m_overlay = nullptr;
-    m_botLabel = nullptr;
-    m_safeLabel = nullptr;
     m_hold1 = m_hold2 = false;
-    m_practiceBackupValid = false;
 }
 
 PlayerFrame BotController::snapshot(PlayerObject* player) const {
@@ -160,7 +144,6 @@ gd::vector<Cell> BotController::scan(PlayLayer* pl, float xMin, float xMax) cons
         switch (type) {
             case GameObjectType::Solid:
             case GameObjectType::Slope:
-            case GameObjectType::Breakable:
                 cell.kind = CellKind::Solid;
                 break;
             case GameObjectType::Hazard:
@@ -289,20 +272,14 @@ void BotController::tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p
         m_cells2 = scan(pl, xMin, xMax);
     }
 
-    bool options[2] = {false, true};
-    bool bestBoth = false;
     bool bestAction = false;
     float bestProgress = -1.0f;
-    for (bool o : options) {
+    for (bool o : {false, true}) {
         SimResult r1 = simulate(s1, m_cells1, lookahead, o);
         SimResult r2 = p2 ? simulate(s2, m_cells2, lookahead, o) : r1;
         bool ok = !r1.died && !r2.died;
-        float prog = std::min(r1.progressX, r2.progressX);
-        if (ok && prog > bestProgress) {
-            bestBoth = true;
-            bestAction = o;
-            bestProgress = prog;
-        } else if (!bestBoth && prog > bestProgress) {
+        float prog = ok ? std::min(r1.progressX, r2.progressX) : -1.0f;
+        if (prog > bestProgress) {
             bestAction = o;
             bestProgress = prog;
         }
@@ -312,58 +289,6 @@ void BotController::tickUnified(PlayLayer* pl, PlayerObject* p1, PlayerObject* p
     if (p2) applyInput(p2, bestAction, &m_hold2);
     m_p1Prev = s1;
     if (p2) m_p2Prev = s2;
-}
-
-void BotController::buildOverlay() {
-    if (!m_layer || m_overlay) return;
-
-    auto overlay = CCLayerColor::create(ccc4(0, 0, 0, 115));
-    overlay->setContentSize(CCSize{170.0f, 62.0f});
-    overlay->setAnchorPoint({0.5f, 0.5f});
-    overlay->setPosition({340.0f, 30.0f});
-    overlay->setZOrder(1000);
-
-    m_botLabel = CCLabelBMFont::create("", "bigFont.fnt");
-    m_safeLabel = CCLabelBMFont::create("", "bigFont.fnt");
-    m_botLabel->setScale(0.5f);
-    m_safeLabel->setScale(0.5f);
-
-    auto itemBot = CCMenuItemLabel::create(m_botLabel, this, menu_selector(BotController::onToggleBot));
-    auto itemSafe = CCMenuItemLabel::create(m_safeLabel, this, menu_selector(BotController::onToggleSafe));
-    itemBot->setPosition({85.0f, 37.0f});
-    itemSafe->setPosition({85.0f, 25.0f});
-
-    auto menu = CCMenu::create();
-    menu->setPosition(0.0f, 0.0f);
-    menu->addChild(itemBot);
-    menu->addChild(itemSafe);
-    overlay->addChild(menu);
-
-    m_overlay = overlay;
-    m_layer->addChild(overlay);
-    refreshOverlay();
-}
-
-void BotController::refreshOverlay() {
-    if (!m_overlay || !m_botLabel || !m_safeLabel) return;
-    m_botLabel->setString(m_enabled ? "BOT ON" : "BOT OFF");
-    m_safeLabel->setString(safeModeActive() ? "SAFE ON" : "SAFE OFF");
-}
-
-void BotController::destroyOverlay() {
-    if (!m_overlay) return;
-    m_overlay->removeFromParent();
-    m_overlay = nullptr;
-    m_botLabel = nullptr;
-    m_safeLabel = nullptr;
-}
-
-void BotController::onToggleBot(CCObject*) {
-    setEnabled(!m_enabled);
-}
-
-void BotController::onToggleSafe(CCObject*) {
-    setSafeMode(!m_safeMode);
 }
 
 } // namespace bot
